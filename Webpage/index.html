@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>ESP32 Relay Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; overscroll-behavior: none; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      background: linear-gradient(160deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      background-attachment: fixed;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 32px;
+    }
+
+    /* HEADER */
+    .header { text-align: center; margin-bottom: 16px; margin-top: env(safe-area-inset-top, 12px); }
+    .header h1 {
+      font-size: clamp(20px, 5vw, 26px);
+      font-weight: 700; letter-spacing: 2px; color: #fff;
+      text-transform: uppercase;
+      text-shadow: 0 0 20px rgba(99,179,237,0.7);
+    }
+    .header p { font-size: 11px; color: #90cdf4; margin-top: 5px; letter-spacing: 3px; text-transform: uppercase; }
+
+    /* CLOCK */
+    .clock-bar {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 16px; padding: 12px 24px; margin-bottom: 14px;
+      max-width: 340px; width: 100%;
+    }
+    .clock-time {
+      font-size: 28px; font-weight: 800; color: #ffffff;
+      letter-spacing: 4px; font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 12px rgba(255,255,255,0.4);
+    }
+    .clock-date {
+      font-size: 12px; color: #ffffff; letter-spacing: 1px; font-weight: 500;
+      opacity: 0.8;
+    }
+
+    /* STATUS BAR */
+    .status-bar {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 50px; padding: 8px 18px; margin-bottom: 20px;
+      font-size: 12px; color: #a0aec0; max-width: 340px; width: 100%; justify-content: center;
+    }
+    .status-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #f56565; flex-shrink: 0; animation: blink 1.8s infinite;
+    }
+    .status-dot.connected { background: #68d391; box-shadow: 0 0 8px #68d391; animation: none; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* GRID */
+    .grid {
+      display: grid; grid-template-columns: repeat(2, 1fr);
+      gap: 14px; width: 100%; max-width: 420px;
+    }
+    @media (max-width: 320px) { .grid { grid-template-columns: 1fr; } }
+
+    /* RELAY CARD */
+    .relay-card {
+      border-radius: 22px; padding: 20px 12px 16px;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      cursor: pointer;
+      border: 2px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.05);
+      box-shadow: 0 4px 18px rgba(0,0,0,0.35);
+      transition: transform 0.12s, box-shadow 0.22s, background 0.22s, border-color 0.22s;
+      touch-action: manipulation; min-height: 185px; justify-content: center;
+    }
+    .relay-card:active { transform: scale(0.93); }
+
+    .relay-card.r1.on { background: #6b2020; border-color: #fc8181; box-shadow: 0 0 28px rgba(252,129,129,0.4); }
+    .relay-card.r2.on { background: #1a305a; border-color: #63b3ed; box-shadow: 0 0 28px rgba(99,179,237,0.4); }
+    .relay-card.r3.on { background: #1a3f2e; border-color: #68d391; box-shadow: 0 0 28px rgba(104,211,145,0.4); }
+    .relay-card.r4.on { background: #3b2d6e; border-color: #b794f4; box-shadow: 0 0 28px rgba(183,148,244,0.4); }
+
+    .relay-icon {
+      width: 52px; height: 52px; border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 26px; transition: background 0.3s; flex-shrink: 0;
+    }
+    .relay-card.r1.on .relay-icon { background: rgba(252,129,129,0.2); }
+    .relay-card.r2.on .relay-icon { background: rgba(99,179,237,0.2); }
+    .relay-card.r3.on .relay-icon { background: rgba(104,211,145,0.2); }
+    .relay-card.r4.on .relay-icon { background: rgba(183,148,244,0.2); }
+
+    .relay-label {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 14px; font-weight: 600; color: #e2e8f0;
+      letter-spacing: 0.5px; text-align: center; min-height: 28px;
+    }
+    .edit-btn {
+      font-size: 14px; opacity: 0.6; cursor: pointer;
+      padding: 4px; border-radius: 6px;
+      flex-shrink: 0; touch-action: manipulation;
+    }
+    .edit-btn:active { opacity: 1; }
+
+    .relay-state {
+      font-size: 11px; font-weight: 700; letter-spacing: 2px;
+      padding: 3px 12px; border-radius: 50px; text-transform: uppercase;
+      background: rgba(255,255,255,0.08); color: #718096;
+      transition: background 0.25s, color 0.25s;
+    }
+    .relay-card.r1.on .relay-state { background: rgba(252,129,129,0.2); color: #fc8181; }
+    .relay-card.r2.on .relay-state { background: rgba(99,179,237,0.2);  color: #63b3ed; }
+    .relay-card.r3.on .relay-state { background: rgba(104,211,145,0.2); color: #68d391; }
+    .relay-card.r4.on .relay-state { background: rgba(183,148,244,0.2); color: #b794f4; }
+
+    /* TOGGLE SWITCH */
+    .toggle-switch {
+      width: 50px; height: 28px; border-radius: 14px;
+      background: rgba(255,255,255,0.12); position: relative; transition: background 0.3s;
+    }
+    .toggle-switch::after {
+      content: ''; position: absolute;
+      width: 22px; height: 22px; border-radius: 50%;
+      background: #718096; top: 3px; left: 3px;
+      transition: transform 0.28s cubic-bezier(.4,0,.2,1), background 0.28s;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    }
+    .relay-card.on .toggle-switch::after { transform: translateX(22px); }
+    .relay-card.r1.on .toggle-switch { background: rgba(252,129,129,0.35); }
+    .relay-card.r1.on .toggle-switch::after { background: #fc8181; }
+    .relay-card.r2.on .toggle-switch { background: rgba(99,179,237,0.35); }
+    .relay-card.r2.on .toggle-switch::after { background: #63b3ed; }
+    .relay-card.r3.on .toggle-switch { background: rgba(104,211,145,0.35); }
+    .relay-card.r3.on .toggle-switch::after { background: #68d391; }
+    .relay-card.r4.on .toggle-switch { background: rgba(183,148,244,0.35); }
+    .relay-card.r4.on .toggle-switch::after { background: #b794f4; }
+
+    /* LAST ACTION */
+    .last-action {
+      font-size: 10px; color: #ffffff; opacity: 0.55;
+      letter-spacing: 0.5px; text-align: center; min-height: 14px;
+    }
+    .relay-card.on .last-action { opacity: 0.8; }
+
+    /* FOOTER */
+    .footer { margin-top: 24px; font-size: 11px; color: #4a5568; letter-spacing: 1px; }
+
+    /* RENAME MODAL */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.65); z-index: 100;
+      align-items: flex-end; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: #1e2a45; border-radius: 24px 24px 0 0;
+      padding: 28px 24px calc(28px + env(safe-area-inset-bottom, 0px));
+      width: 100%; max-width: 480px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .modal h3 { color: #e2e8f0; font-size: 16px; font-weight: 600; text-align: center; }
+    .modal input {
+      background: rgba(255,255,255,0.08);
+      border: 1.5px solid rgba(255,255,255,0.2);
+      border-radius: 12px; color: #fff;
+      font-size: 17px; font-weight: 600; text-align: center;
+      padding: 12px 16px; outline: none; width: 100%; -webkit-appearance: none;
+    }
+    .modal input:focus { border-color: rgba(255,255,255,0.55); }
+    .modal-btns { display: flex; gap: 10px; }
+    .modal-btns button {
+      flex: 1; padding: 13px; border-radius: 12px;
+      border: none; font-size: 15px; font-weight: 700;
+      cursor: pointer; touch-action: manipulation;
+    }
+    .btn-cancel { background: rgba(255,255,255,0.08); color: #a0aec0; }
+    .btn-save   { background: #4299e1; color: #fff; }
+    .btn-save:active { background: #3182ce; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>⚡ Relay Control</h1>
+    <p>ESP32 — Harineash</p>
+  </div>
+
+  <!-- CLOCK -->
+  <div class="clock-bar">
+    <div class="clock-time" id="clock-time">00:00:00</div>
+    <div class="clock-date" id="clock-date">Loading...</div>
+  </div>
+
+  <!-- STATUS -->
+  <div class="status-bar">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Connecting to HiveMQ…</span>
+  </div>
+
+  <!-- RELAY GRID -->
+  <div class="grid">
+    <div class="relay-card r1 off" id="card1">
+      <div class="relay-icon">🔴</div>
+      <div class="relay-label">
+        <span id="labeltext1">Relay 1</span>
+        <span class="edit-btn" id="editbtn1">✏️</span>
+      </div>
+      <div class="relay-state" id="state1">OFF</div>
+      <div class="toggle-switch"></div>
+      <div class="last-action" id="ts1">No action yet</div>
+    </div>
+
+    <div class="relay-card r2 off" id="card2">
+      <div class="relay-icon">🔵</div>
+      <div class="relay-label">
+        <span id="labeltext2">Relay 2</span>
+        <span class="edit-btn" id="editbtn2">✏️</span>
+      </div>
+      <div class="relay-state" id="state2">OFF</div>
+      <div class="toggle-switch"></div>
+      <div class="last-action" id="ts2">No action yet</div>
+    </div>
+
+    <div class="relay-card r3 off" id="card3">
+      <div class="relay-icon">🟢</div>
+      <div class="relay-label">
+        <span id="labeltext3">Relay 3</span>
+        <span class="edit-btn" id="editbtn3">✏️</span>
+      </div>
+      <div class="relay-state" id="state3">OFF</div>
+      <div class="toggle-switch"></div>
+      <div class="last-action" id="ts3">No action yet</div>
+    </div>
+
+    <div class="relay-card r4 off" id="card4">
+      <div class="relay-icon">🟣</div>
+      <div class="relay-label">
+        <span id="labeltext4">Relay 4</span>
+        <span class="edit-btn" id="editbtn4">✏️</span>
+      </div>
+      <div class="relay-state" id="state4">OFF</div>
+      <div class="toggle-switch"></div>
+      <div class="last-action" id="ts4">No action yet</div>
+    </div>
+  </div>
+
+  <div class="footer">MQTT · home/relay · HiveMQ</div>
+
+  <!-- RENAME MODAL -->
+  <div class="modal-overlay" id="renameModal">
+    <div class="modal">
+      <h3 id="modalTitle">Rename Relay</h3>
+      <input type="text" id="modalInput" maxlength="18" placeholder="Enter name…">
+      <div class="modal-btns">
+        <button class="btn-cancel" id="modalCancel">Cancel</button>
+        <button class="btn-save"   id="modalSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── NETWORK TIME via worldtimeapi.org ──
+    var DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    var MONS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    var networkOffset = 0;   // ms difference: network time - local time
+    var clockReady    = false;
+
+    function formatAndDisplay(date) {
+      var hh  = ('0' + date.getHours()).slice(-2);
+      var mm  = ('0' + date.getMinutes()).slice(-2);
+      var ss  = ('0' + date.getSeconds()).slice(-2);
+      var dateStr = DAYS[date.getDay()] + ', ' + date.getDate() + ' ' + MONS[date.getMonth()] + ' ' + date.getFullYear();
+      document.getElementById('clock-time').textContent = hh + ':' + mm + ':' + ss;
+      document.getElementById('clock-date').textContent = dateStr;
+    }
+
+    function updateClock() {
+      var now = new Date(Date.now() + networkOffset);
+      formatAndDisplay(now);
+    }
+
+    function fetchNetworkTime() {
+      document.getElementById('clock-date').textContent = 'Syncing time...';
+      fetch('https://worldtimeapi.org/api/ip')
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          // data.unixtime is UTC epoch seconds
+          var networkNow  = data.unixtime * 1000;
+          networkOffset   = networkNow - Date.now();
+          clockReady      = true;
+          updateClock();
+          setInterval(updateClock, 1000);
+        })
+        .catch(function() {
+          // fallback: use local time if network fails
+          document.getElementById('clock-date').textContent = 'Network time unavailable';
+          clockReady = true;
+          updateClock();
+          setInterval(updateClock, 1000);
+        });
+    }
+
+    fetchNetworkTime();
+    // Re-sync every 30 minutes to stay accurate
+    setInterval(fetchNetworkTime, 30 * 60 * 1000);
+
+    // ── MQTT ──
+    var client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+    client.on('connect', function() {
+      document.getElementById('status-dot').classList.add('connected');
+      document.getElementById('status-text').textContent = 'Connected to HiveMQ';
+    });
+    client.on('error', function() {
+      document.getElementById('status-text').textContent = 'Connection error';
+    });
+    client.on('offline', function() {
+      document.getElementById('status-dot').classList.remove('connected');
+      document.getElementById('status-text').textContent = 'Reconnecting…';
+    });
+
+    // ── RELAY STATE ──
+    var relayState = {1: false, 2: false, 3: false, 4: false};
+
+    function getTimeStr() {
+      var now = new Date();
+      var hh  = ('0' + now.getHours()).slice(-2);
+      var mm  = ('0' + now.getMinutes()).slice(-2);
+      var ss  = ('0' + now.getSeconds()).slice(-2);
+      return hh + ':' + mm + ':' + ss;
+    }
+
+    function toggleRelay(relay) {
+      var card    = document.getElementById('card'  + relay);
+      var stateEl = document.getElementById('state' + relay);
+      var tsEl    = document.getElementById('ts'    + relay);
+      var isOn    = relayState[relay];
+
+      client.publish('home/relay', 'R' + relay + (isOn ? 'OFF' : 'ON'));
+      relayState[relay] = !isOn;
+      card.classList.toggle('on',  !isOn);
+      card.classList.toggle('off',  isOn);
+      stateEl.textContent = isOn ? 'OFF' : 'ON';
+      tsEl.textContent    = 'Last: ' + getTimeStr();
+    }
+
+    // Card tap
+    for (var r = 1; r <= 4; r++) {
+      (function(relay) {
+        document.getElementById('card' + relay).addEventListener('click', function(e) {
+          if (e.target.classList.contains('edit-btn')) return;
+          toggleRelay(relay);
+        });
+      })(r);
+    }
+
+    // ── RENAME MODAL ──
+    var editingRelay = null;
+    var modal        = document.getElementById('renameModal');
+    var modalInput   = document.getElementById('modalInput');
+    var modalTitle   = document.getElementById('modalTitle');
+
+    function openModal(relay) {
+      editingRelay = relay;
+      modalTitle.textContent = 'Rename Relay ' + relay;
+      modalInput.value = document.getElementById('labeltext' + relay).textContent.trim();
+      modal.classList.add('open');
+      setTimeout(function() { modalInput.focus(); }, 150);
+    }
+    function closeModal() {
+      modal.classList.remove('open');
+      modalInput.blur();
+      editingRelay = null;
+    }
+    function saveModal() {
+      if (!editingRelay) return;
+      var val = modalInput.value.trim();
+      if (val) document.getElementById('labeltext' + editingRelay).textContent = val;
+      closeModal();
+    }
+
+    for (var i = 1; i <= 4; i++) {
+      (function(relay) {
+        document.getElementById('editbtn' + relay).addEventListener('click', function(e) {
+          e.stopPropagation();
+          openModal(relay);
+        });
+      })(i);
+    }
+
+    document.getElementById('modalSave').addEventListener('click', saveModal);
+    document.getElementById('modalCancel').addEventListener('click', closeModal);
+    modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+    modalInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter')  saveModal();
+      if (e.key === 'Escape') closeModal();
+    });
+  </script>
+</body>
+</html>
