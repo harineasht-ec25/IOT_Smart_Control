@@ -1,4 +1,4 @@
-#define LED_BUILTIN 2   // ESP32 built-in LED pin
+#define LED_BUILTIN 2   // ESP32 built_in LED pin
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
