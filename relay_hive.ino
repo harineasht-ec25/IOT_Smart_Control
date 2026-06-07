@@ -6,7 +6,7 @@
 
 #define WIFI_LED 2
 
-// -------- RELAY PINS --------
+// -------- RELAY PINS ---------
 #define RELAY1 18
 #define RELAY2 19
 #define RELAY3 21
