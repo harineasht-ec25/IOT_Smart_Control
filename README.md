@@ -1,6 +1,6 @@
 🚀 ESP32 RelayVerse ⚡
 
-Smart IoT Relay Automation using ESP32 • HiveMQ • MQTT • Web Dashboard
+Smart IoT Relay Automation using ESP32 • HiveMQ • MQTT • Web Dashboard •
 
 > 🌍 Control electrical devices from anywhere in the world using ESP32 and MQTT-powered cloud communication.
 
