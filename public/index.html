@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Tech Titan · Relay Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg-from:#f5f0e8;--bg-mid:#ede8dc;--bg-to:#e8e0d0;
+      --blue:#1d6fce;--blue-dk:#1558a8;--blue-lt:#4a9ae8;
+      --cream:#f9f5ed;--card-bg:#ffffff;
+      --border:rgba(29,111,206,0.15);--text:#1a2740;--muted:#7a8ba8;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+    html,body{height:100%;overscroll-behavior:none;}
+    body{font-family:'Inter','Segoe UI',sans-serif;min-height:100vh;min-height:-webkit-fill-available;background:linear-gradient(150deg,var(--bg-from) 0%,var(--bg-mid) 55%,var(--bg-to) 100%);background-attachment:fixed;display:flex;flex-direction:column;align-items:center;padding:20px 16px 40px;}
+
+    /* HEADER */
+    .header{width:100%;max-width:480px;display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;margin-top:env(safe-area-inset-top,10px);}
+    .brand{display:flex;align-items:center;gap:10px;}
+    .brand-icon{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--blue),var(--blue-lt));display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 14px rgba(29,111,206,0.35);flex-shrink:0;}
+    .brand-text{display:flex;flex-direction:column;gap:1px;}
+    .brand-name{font-family:'Space Grotesk',sans-serif;font-size:17px;font-weight:700;color:var(--text);letter-spacing:0.3px;}
+    .brand-sub{font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;}
+    .settings-btn{width:40px;height:40px;border-radius:12px;background:var(--card-bg);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;box-shadow:0 2px 8px rgba(29,111,206,0.1);transition:background 0.2s;touch-action:manipulation;}
+    .settings-btn:active{background:#e8f0fb;}
+
+    /* CLOCK */
+    .clock-bar{display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--card-bg);border:1.5px solid var(--border);border-radius:18px;padding:14px 28px;margin-bottom:10px;max-width:480px;width:100%;box-shadow:0 2px 12px rgba(29,111,206,0.08);position:relative;}
+    .clock-time{font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;color:var(--text);letter-spacing:5px;font-variant-numeric:tabular-nums;}
+    .clock-date{font-size:11px;color:var(--muted);letter-spacing:1.5px;font-weight:500;text-transform:uppercase;}
+    .rtc-badge{position:absolute;top:10px;right:14px;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:2px 8px;border-radius:20px;background:rgba(29,111,206,0.08);color:var(--muted);border:1px solid var(--border);transition:background 0.3s,color 0.3s;}
+    .rtc-badge.synced{background:rgba(16,185,129,0.1);color:#059669;border-color:rgba(16,185,129,0.3);}
+
+    /* STATUS */
+    .status-bar{display:flex;align-items:center;gap:8px;background:var(--card-bg);border:1.5px solid var(--border);border-radius:50px;padding:7px 18px;margin-bottom:18px;font-size:12px;color:var(--muted);max-width:480px;width:100%;justify-content:center;box-shadow:0 2px 8px rgba(29,111,206,0.07);}
+    .status-dot{width:8px;height:8px;border-radius:50%;background:#f87171;flex-shrink:0;animation:blink 1.8s infinite;}
+    .status-dot.connected{background:#10b981;box-shadow:0 0 6px rgba(16,185,129,0.5);animation:none;}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+
+    .page-body{display:flex;flex-direction:column;gap:12px;width:100%;max-width:480px;}
+
+    /* 3 RELAY CARDS ROW */
+    .relay-row-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;}
+    @media(max-width:340px){.relay-row-grid{grid-template-columns:1fr;}}
+
+    /* RELAY CARD */
+    .relay-card{border-radius:18px;padding:18px 8px 14px;display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer;border:1.5px solid var(--border);background:var(--card-bg);box-shadow:0 3px 14px rgba(29,111,206,0.09);transition:transform 0.12s,box-shadow 0.25s,background 0.25s,border-color 0.25s;touch-action:manipulation;justify-content:center;position:relative;}
+    .relay-card:active{transform:scale(0.92);}
+
+    /* syncing spinner overlay */
+    .sync-overlay{display:none;position:absolute;inset:0;border-radius:18px;background:rgba(255,255,255,0.55);align-items:center;justify-content:center;font-size:18px;}
+    .relay-card.syncing .sync-overlay{display:flex;animation:spin 1s linear infinite;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    .relay-card.r1.on{background:#fff0f0;border-color:#fca5a5;box-shadow:0 0 22px rgba(239,68,68,0.15);}
+    .relay-card.r2.on{background:#eff6ff;border-color:#93c5fd;box-shadow:0 0 22px rgba(59,130,246,0.18);}
+    .relay-card.r3.on{background:#f0fdf4;border-color:#6ee7b7;box-shadow:0 0 22px rgba(16,185,129,0.15);}
+    .relay-icon{width:46px;height:46px;border-radius:50%;background:#f0f4fb;display:flex;align-items:center;justify-content:center;font-size:22px;transition:background 0.3s;flex-shrink:0;}
+    .relay-card.r1.on .relay-icon{background:rgba(239,68,68,0.1);}
+    .relay-card.r2.on .relay-icon{background:rgba(59,130,246,0.1);}
+    .relay-card.r3.on .relay-icon{background:rgba(16,185,129,0.1);}
+    .relay-label{font-size:11px;font-weight:700;color:var(--text);text-align:center;line-height:1.2;}
+    .relay-state{font-size:9px;font-weight:700;letter-spacing:1.8px;padding:2px 10px;border-radius:50px;text-transform:uppercase;background:#f0f4fb;color:var(--muted);transition:background 0.25s,color 0.25s;}
+    .relay-card.r1.on .relay-state{background:rgba(239,68,68,0.1);color:#ef4444;}
+    .relay-card.r2.on .relay-state{background:rgba(59,130,246,0.12);color:#2563eb;}
+    .relay-card.r3.on .relay-state{background:rgba(16,185,129,0.12);color:#059669;}
+    .toggle-switch{width:44px;height:24px;border-radius:12px;background:#dde4ee;position:relative;transition:background 0.3s;}
+    .toggle-switch::after{content:'';position:absolute;width:18px;height:18px;border-radius:50%;background:#b0bcc8;top:3px;left:3px;transition:transform 0.28s cubic-bezier(.4,0,.2,1),background 0.28s;box-shadow:0 1px 4px rgba(0,0,0,0.18);}
+    .relay-card.on .toggle-switch::after{transform:translateX(20px);}
+    .relay-card.r1.on .toggle-switch{background:rgba(239,68,68,0.2);}
+    .relay-card.r1.on .toggle-switch::after{background:#ef4444;}
+    .relay-card.r2.on .toggle-switch{background:rgba(59,130,246,0.25);}
+    .relay-card.r2.on .toggle-switch::after{background:#2563eb;}
+    .relay-card.r3.on .toggle-switch{background:rgba(16,185,129,0.25);}
+    .relay-card.r3.on .toggle-switch::after{background:#10b981;}
+    .last-action{font-size:9px;color:var(--muted);text-align:center;min-height:13px;}
+    .relay-card.on .last-action{color:var(--text);}
+
+    /* TIMER CARD */
+    .timer-card{border-radius:22px;border:1.5px solid var(--border);background:var(--card-bg);box-shadow:0 3px 16px rgba(29,111,206,0.09);padding:20px 20px 18px;display:flex;flex-direction:column;gap:16px;transition:background 0.3s,border-color 0.3s,box-shadow 0.3s;}
+    .timer-card.running{background:#f5f3ff;border-color:#c4b5fd;box-shadow:0 0 32px rgba(124,58,237,0.16);}
+    .timer-card.done{background:#f0fdf4;border-color:#6ee7b7;box-shadow:0 0 24px rgba(16,185,129,0.14);}
+    .timer-top{display:flex;align-items:center;gap:12px;}
+    .timer-icon-circle{width:46px;height:46px;border-radius:50%;background:#f0f4fb;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;transition:background 0.3s;}
+    .timer-card.running .timer-icon-circle{background:rgba(124,58,237,0.12);}
+    .timer-card.done    .timer-icon-circle{background:rgba(16,185,129,0.12);}
+    .timer-meta{flex:1;}
+    .timer-name{font-size:14px;font-weight:700;color:var(--text);}
+    .timer-sub{font-size:10px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-top:2px;}
+    .timer-badge{font-size:10px;font-weight:700;letter-spacing:2px;padding:4px 12px;border-radius:50px;text-transform:uppercase;background:#f0f4fb;color:var(--muted);transition:background 0.3s,color 0.3s;flex-shrink:0;}
+    .timer-card.running .timer-badge{background:rgba(124,58,237,0.12);color:#7c3aed;}
+    .timer-card.done    .timer-badge{background:rgba(16,185,129,0.12);color:#059669;}
+
+    /* live status pill on timer card */
+    .r4-live-badge{font-size:9px;font-weight:700;letter-spacing:1.5px;padding:2px 10px;border-radius:50px;text-transform:uppercase;background:#f0f4fb;color:var(--muted);margin-left:4px;transition:background 0.3s,color 0.3s;}
+    .r4-live-badge.on{background:rgba(124,58,237,0.12);color:#7c3aed;}
+
+    .timer-body{display:flex;align-items:center;gap:18px;}
+    .ring-wrap{position:relative;width:112px;height:112px;flex-shrink:0;}
+    .ring-svg{width:112px;height:112px;transform:rotate(-90deg);}
+    .ring-track{fill:none;stroke:#e8eef8;stroke-width:9;}
+    .ring-fill{fill:none;stroke:#7c3aed;stroke-width:9;stroke-linecap:round;stroke-dasharray:295.3;stroke-dashoffset:295.3;transition:stroke-dashoffset 0.95s linear;}
+    .timer-card.done .ring-fill{stroke:#10b981;}
+    .ring-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;}
+    .ring-digits{font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;color:var(--text);letter-spacing:1px;font-variant-numeric:tabular-nums;}
+    .ring-unit{font-size:9px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;}
+    .timer-controls{flex:1;display:flex;flex-direction:column;gap:11px;}
+    .dur-row-label{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;}
+    .dur-inputs{display:flex;align-items:center;gap:4px;}
+    .dur-block{display:flex;flex-direction:column;align-items:center;gap:2px;}
+    .dur-field{width:46px;padding:8px 4px;border-radius:10px;border:1.5px solid var(--border);background:#f8faff;font-size:17px;font-weight:700;text-align:center;color:var(--text);font-family:'Space Grotesk',sans-serif;outline:none;-webkit-appearance:none;appearance:none;}
+    .dur-field:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,111,206,0.1);}
+    .dur-field:disabled{opacity:0.4;background:#eef2f8;}
+    .dur-lbl{font-size:9px;color:var(--muted);font-weight:600;letter-spacing:0.5px;text-transform:uppercase;}
+    .dur-sep{font-size:18px;font-weight:700;color:var(--muted);margin-bottom:12px;}
+    .presets{display:flex;gap:5px;flex-wrap:wrap;}
+    .preset-btn{padding:4px 8px;border-radius:8px;border:1.5px solid var(--border);background:#f8faff;font-size:11px;font-weight:700;color:var(--blue);cursor:pointer;touch-action:manipulation;transition:background 0.15s;}
+    .preset-btn:active{background:#dbeafe;}
+    .preset-btn:disabled{opacity:0.3;cursor:default;}
+    .timer-btns{display:flex;gap:8px;}
+    .btn-timer-start{flex:1;padding:11px;border-radius:12px;background:linear-gradient(135deg,#7c3aed,#a78bfa);border:none;color:#fff;font-size:13px;font-weight:700;cursor:pointer;touch-action:manipulation;font-family:'Inter',sans-serif;box-shadow:0 4px 14px rgba(124,58,237,0.3);transition:opacity 0.2s;}
+    .btn-timer-start:active{opacity:0.82;}
+    .btn-timer-cancel{padding:11px 16px;border-radius:12px;background:#f0f4fb;border:1.5px solid var(--border);color:var(--muted);font-size:13px;font-weight:700;cursor:pointer;touch-action:manipulation;font-family:'Inter',sans-serif;display:none;}
+    .btn-timer-cancel:active{background:#e4eaf5;}
+    .timer-card.running .btn-timer-start{display:none;}
+    .timer-card.running .btn-timer-cancel{display:block;}
+    .timer-card.done .btn-timer-start{display:block;background:linear-gradient(135deg,#059669,#34d399);box-shadow:0 4px 14px rgba(5,150,105,0.28);}
+    .timer-card.done .btn-timer-cancel{display:none;}
+
+    /* RTC schedule */
+    .rtc-row{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:14px;background:rgba(29,111,206,0.04);border:1.5px solid rgba(29,111,206,0.1);}
+    .rtc-row-title{font-size:10px;font-weight:700;color:var(--blue);letter-spacing:1.5px;text-transform:uppercase;display:flex;align-items:center;gap:5px;}
+    .rtc-schedule-inputs{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+    .rtc-time-input{width:80px;padding:7px 8px;border-radius:8px;border:1.5px solid var(--border);background:#fff;font-size:14px;font-weight:700;color:var(--text);font-family:'Space Grotesk',sans-serif;outline:none;-webkit-appearance:none;}
+    .rtc-time-input:focus{border-color:var(--blue);box-shadow:0 0 0 2px rgba(29,111,206,0.1);}
+    .rtc-lbl{font-size:11px;color:var(--muted);font-weight:600;}
+    .btn-rtc-set{padding:7px 14px;border-radius:8px;background:var(--blue);border:none;color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;touch-action:manipulation;box-shadow:0 2px 8px rgba(29,111,206,0.25);}
+    .btn-rtc-set:active{background:var(--blue-dk);}
+    .btn-rtc-clear{padding:7px 10px;border-radius:8px;background:#f0f4fb;border:1.5px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;touch-action:manipulation;}
+    .rtc-status-line{font-size:10px;color:var(--muted);letter-spacing:0.3px;min-height:14px;}
+    .rtc-status-line.active{color:#7c3aed;font-weight:600;}
+
+    /* MQTT flash */
+    .mqtt-flash{display:none;font-size:10px;font-weight:700;letter-spacing:1px;text-align:center;padding:5px;border-radius:8px;background:rgba(124,58,237,0.07);color:#7c3aed;}
+
+    /* FOOTER */
+    .footer{margin-top:20px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;}
+    .footer-dot{width:3px;height:3px;border-radius:50%;background:var(--muted);opacity:0.4;}
+
+    /* SETTINGS PANEL */
+    .panel-overlay{display:none;position:fixed;inset:0;background:rgba(15,30,60,0.4);z-index:200;align-items:center;justify-content:center;padding:24px 16px;backdrop-filter:blur(3px);}
+    .panel-overlay.open{display:flex;}
+    .panel{background:var(--cream);border-radius:24px;border:1.5px solid var(--border);padding:28px 24px 24px;width:100%;max-width:380px;display:flex;flex-direction:column;gap:20px;box-shadow:0 20px 60px rgba(29,111,206,0.18);max-height:90vh;overflow-y:auto;}
+    .panel-header{display:flex;align-items:center;justify-content:space-between;}
+    .panel-title{font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;}
+    .panel-close-x{width:32px;height:32px;border-radius:50%;background:rgba(29,111,206,0.08);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--muted);touch-action:manipulation;}
+    .panel-close-x:active{background:rgba(29,111,206,0.18);}
+    .panel-section-label{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;}
+    .name-row{display:flex;align-items:center;gap:10px;background:#fff;border:1.5px solid var(--border);border-radius:12px;padding:10px 14px;transition:border-color 0.2s;}
+    .name-row:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,111,206,0.1);}
+    .name-row-icon{font-size:18px;flex-shrink:0;}
+    .name-row input{flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:14px;font-weight:600;font-family:'Inter',sans-serif;}
+    .name-row input::placeholder{color:var(--muted);opacity:0.55;font-weight:400;}
+    .btn-save-all{width:100%;padding:14px;border-radius:14px;background:var(--blue);border:none;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;box-shadow:0 4px 16px rgba(29,111,206,0.32);}
+    .btn-save-all:active{background:var(--blue-dk);}
+    .bg-swatches{display:flex;flex-wrap:wrap;gap:10px;}
+    .swatch{width:38px;height:38px;border-radius:10px;cursor:pointer;border:2.5px solid transparent;transition:transform 0.15s,border-color 0.15s;flex-shrink:0;}
+    .swatch:active{transform:scale(0.85);}
+    .swatch.active{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,111,206,0.18);}
+    .swatch.s1{background:linear-gradient(135deg,#f5f0e8,#ede8dc,#e8e0d0);}
+    .swatch.s2{background:linear-gradient(135deg,#dbeafe,#bfdbfe,#93c5fd);}
+    .swatch.s3{background:linear-gradient(135deg,#f0f9ff,#e0f2fe,#bae6fd);}
+    .swatch.s4{background:linear-gradient(135deg,#f8fafc,#e2e8f0,#cbd5e1);}
+    .swatch.s5{background:linear-gradient(135deg,#faf5ff,#ede9fe,#ddd6fe);}
+    .swatch.s6{background:linear-gradient(135deg,#f0fdf4,#dcfce7,#bbf7d0);}
+    .swatch.s7{background:linear-gradient(135deg,#fff7ed,#fed7aa,#fdba74);}
+    .swatch.s8{background:linear-gradient(135deg,#0d1117,#0f1923,#0a1628);}
+    .swatch-lbl{font-size:10px;color:var(--muted);margin-top:5px;text-align:center;}
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-text">
+        <span class="brand-name">Tech Titan</span>
+        <span class="brand-sub">Relay Control</span>
+      </div>
+    </div>
+    <div class="settings-btn" id="settingsBtn">⚙️</div>
+  </div>
+
+  <div class="clock-bar">
+    <div class="clock-time" id="clock-time">00:00:00</div>
+    <div class="clock-date" id="clock-date">Loading...</div>
+    <div class="rtc-badge" id="rtcBadge">NTP</div>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Connecting to HiveMQ…</span>
+  </div>
+
+  <div class="page-body">
+
+    <!-- 3 RELAY CARDS -->
+    <div class="relay-row-grid">
+      <div class="relay-card r1 off" id="card1">
+        <div class="sync-overlay">⟳</div>
+        <div class="relay-icon">🔴</div>
+        <div class="relay-label"><span id="labeltext1">Relay 1</span></div>
+        <div class="relay-state" id="state1">OFF</div>
+        <div class="toggle-switch"></div>
+        <div class="last-action" id="ts1">—</div>
+      </div>
+      <div class="relay-card r2 off" id="card2">
+        <div class="sync-overlay">⟳</div>
+        <div class="relay-icon">🔵</div>
+        <div class="relay-label"><span id="labeltext2">Relay 2</span></div>
+        <div class="relay-state" id="state2">OFF</div>
+        <div class="toggle-switch"></div>
+        <div class="last-action" id="ts2">—</div>
+      </div>
+      <div class="relay-card r3 off" id="card3">
+        <div class="sync-overlay">⟳</div>
+        <div class="relay-icon">🟢</div>
+        <div class="relay-label"><span id="labeltext3">Relay 3</span></div>
+        <div class="relay-state" id="state3">OFF</div>
+        <div class="toggle-switch"></div>
+        <div class="last-action" id="ts3">—</div>
+      </div>
+    </div>
+
+    <!-- RELAY 4 TIMER CARD -->
+    <div class="timer-card" id="timerCard">
+      <div class="timer-top">
+        <div class="timer-icon-circle">⏱️</div>
+        <div class="timer-meta">
+          <div class="timer-name" id="labeltext4">Relay 4</div>
+          <div class="timer-sub">Timer Switch</div>
+        </div>
+        <div class="timer-badge" id="timerBadge">IDLE</div>
+        <span class="r4-live-badge" id="r4LiveBadge">OFF</span>
+      </div>
+
+      <div class="timer-body">
+        <div class="ring-wrap">
+          <svg class="ring-svg" viewBox="0 0 112 112">
+            <circle class="ring-track" cx="56" cy="56" r="47"/>
+            <circle class="ring-fill"  cx="56" cy="56" r="47" id="ringFill"/>
+          </svg>
+          <div class="ring-center">
+            <div class="ring-digits" id="ringDigits">00:00:00</div>
+            <div class="ring-unit"   id="ringUnit">ready</div>
+          </div>
+        </div>
+
+        <div class="timer-controls">
+          <div>
+            <div class="dur-row-label">Set Duration</div>
+            <div class="dur-inputs">
+              <div class="dur-block"><input class="dur-field" type="number" id="durHr"  min="0" max="23" value="0"><span class="dur-lbl">HH</span></div>
+              <span class="dur-sep">:</span>
+              <div class="dur-block"><input class="dur-field" type="number" id="durMin" min="0" max="59" value="0"><span class="dur-lbl">MM</span></div>
+              <span class="dur-sep">:</span>
+              <div class="dur-block"><input class="dur-field" type="number" id="durSec" min="0" max="59" value="30"><span class="dur-lbl">SS</span></div>
+            </div>
+          </div>
+          <div class="presets">
+            <button class="preset-btn" onclick="setPreset(0,0,30)">30s</button>
+            <button class="preset-btn" onclick="setPreset(0,1,0)">1m</button>
+            <button class="preset-btn" onclick="setPreset(0,5,0)">5m</button>
+            <button class="preset-btn" onclick="setPreset(0,15,0)">15m</button>
+            <button class="preset-btn" onclick="setPreset(0,30,0)">30m</button>
+            <button class="preset-btn" onclick="setPreset(1,0,0)">1h</button>
+            <button class="preset-btn" onclick="setPreset(2,0,0)">2h</button>
+            <button class="preset-btn" onclick="setPreset(6,0,0)">6h</button>
+          </div>
+          <div class="timer-btns">
+            <button class="btn-timer-start"  id="btnStart"  onclick="startTimer()">▶ Start</button>
+            <button class="btn-timer-cancel" id="btnCancel" onclick="cancelTimer()">✕ Stop</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- RTC SCHEDULE -->
+      <div class="rtc-row">
+        <div class="rtc-row-title">🕐 RTC Schedule (auto ON/OFF)</div>
+        <div class="rtc-schedule-inputs">
+          <span class="rtc-lbl">ON</span>
+          <input class="rtc-time-input" type="time" id="rtcOnTime" value="06:00">
+          <span class="rtc-lbl">OFF</span>
+          <input class="rtc-time-input" type="time" id="rtcOffTime" value="07:00">
+          <button class="btn-rtc-set" onclick="setRtcSchedule()">Set</button>
+          <button class="btn-rtc-clear" onclick="clearRtcSchedule()">Clear</button>
+        </div>
+        <div class="rtc-status-line" id="rtcStatusLine">No schedule active</div>
+      </div>
+
+      <div class="mqtt-flash" id="mqttFlash"></div>
+    </div>
+
+  </div><!-- /page-body -->
+
+  <div class="footer">
+    <span>MQTT</span><div class="footer-dot"></div>
+    <span>home/relay</span><div class="footer-dot"></div>
+    <span>HiveMQ</span>
+  </div>
+
+  <!-- SETTINGS PANEL -->
+  <div class="panel-overlay" id="settingsPanel">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">⚙️ Settings</div>
+        <div class="panel-close-x" onclick="closeSettings()">✕</div>
+      </div>
+      <div>
+        <div class="panel-section-label">Relay Names</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div class="name-row"><span class="name-row-icon">🔴</span><input type="text" id="pname1" maxlength="18" placeholder="Relay 1 name"></div>
+          <div class="name-row"><span class="name-row-icon">🔵</span><input type="text" id="pname2" maxlength="18" placeholder="Relay 2 name"></div>
+          <div class="name-row"><span class="name-row-icon">🟢</span><input type="text" id="pname3" maxlength="18" placeholder="Relay 3 name"></div>
+          <div class="name-row"><span class="name-row-icon">⏱️</span><input type="text" id="pname4" maxlength="18" placeholder="Relay 4 (Timer) name"></div>
+        </div>
+      </div>
+      <div>
+        <div class="panel-section-label">Background Theme</div>
+        <div class="bg-swatches">
+          <div style="display:flex;flex-direction:column;align-items:center;"><div class="swatch s1 active" onclick="setBg(1,this)"></div><div class="swatch-lbl">Cream</div></div>
+          <div style="display:flex;flex-direction:column;align-items:center;"><div class="swatch s2" onclick="setBg(2,this)"></div><div class="swatch-lbl">Sky</div></div>
+          <div style="display:flex;flex-direction:column;align-items:center;"><div class="swatch s3" onclick="setBg(3,this)"></div><div class="swatch-lbl">Cyan</div></div>
+          <div style="display:flex;flex-direction:column;align-items:center;"><div class="swatch s4" onclick="setBg(4,this)"></div><div class="swatch-lbl">Slate</div></div>
+          <div style="display:flex;flex-direction:column;align-items:center;"><div class="swatch s5" onclick="setBg(5,this)"></div><div class="swatch-lbl">Violet</div></div>
+          <div style="display:flex;flex-direction:column;align-items:center;"><div class="swatch s6" onclick="setBg(6,this)"></div><div class="swatch-lbl">Mint</div></div>
+          <div style="display:flex;flex-direction:column;align-items:center;"><div class="swatch s7" onclick="setBg(7,this)"></div><div class="swatch-lbl">Peach</div></div>
+          <div style="display:flex;flex-direction:column;align-items:center;"><div class="swatch s8" onclick="setBg(8,this)"></div><div class="swatch-lbl">Dark</div></div>
+        </div>
+      </div>
+      <button class="btn-save-all" onclick="saveAll()">Save Changes</button>
+    </div>
+  </div>
+
+  <script>
+  /* ═══════════════════════════
+     CLOCK — RTC via MQTT / NTP fallback
+  ═══════════════════════════ */
+  var DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var clockOffset=0, rtcSynced=false;
+
+  function applyTime(epoch){
+    clockOffset=epoch*1000-Date.now(); rtcSynced=true;
+    document.getElementById('rtcBadge').textContent='RTC ✓';
+    document.getElementById('rtcBadge').classList.add('synced');
+  }
+  function pad2(n){return('0'+n).slice(-2);}
+  function updateClock(){
+    var d=new Date(Date.now()+clockOffset);
+    document.getElementById('clock-time').textContent=pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds());
+    document.getElementById('clock-date').textContent=DAYS[d.getDay()]+' · '+d.getDate()+' '+MONS[d.getMonth()]+' '+d.getFullYear();
+    checkRtcSchedule(d);
+  }
+  function fetchNTP(){
+    fetch('https://worldtimeapi.org/api/ip')
+      .then(function(r){return r.json();})
+      .then(function(d){if(!rtcSynced)clockOffset=d.unixtime*1000-Date.now();document.getElementById('clock-date').textContent='';updateClock();setInterval(updateClock,1000);})
+      .catch(function(){updateClock();setInterval(updateClock,1000);});
+  }
+  fetchNTP(); setInterval(fetchNTP,30*60*1000);
+
+  /* ═══════════════════════════
+     MQTT
+     Publishes to:   home/relay
+     Subscribes to:  home/relay/status       → "R1:ON" / "R1:OFF"
+                     home/relay/status/all   → "R1:ON,R2:OFF,R3:ON,R4:OFF"
+                     home/relay/status/r1..4 → individual retained topics
+                     home/rtc / home/rtc/time
+  ═══════════════════════════ */
+  var mqttClient=mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+
+  mqttClient.on('connect',function(){
+    document.getElementById('status-dot').classList.add('connected');
+    document.getElementById('status-text').textContent='Connected · HiveMQ';
+    // Subscribe to all status topics
+    mqttClient.subscribe('home/relay/status');
+    mqttClient.subscribe('home/relay/status/all');
+    mqttClient.subscribe('home/relay/status/r1');
+    mqttClient.subscribe('home/relay/status/r2');
+    mqttClient.subscribe('home/relay/status/r3');
+    mqttClient.subscribe('home/relay/status/r4');
+    mqttClient.subscribe('home/rtc');
+    mqttClient.subscribe('home/rtc/time');
+    // Ask ESP32 to publish current state (handles retained messages too)
+    mqttClient.publish('home/relay','STATUS');
+  });
+  mqttClient.on('error',function(){document.getElementById('status-text').textContent='Connection error';});
+  mqttClient.on('offline',function(){
+    document.getElementById('status-dot').classList.remove('connected');
+    document.getElementById('status-text').textContent='Reconnecting…';
+  });
+
+  mqttClient.on('message',function(topic,payload){
+    var msg=payload.toString().trim();
+
+    /* ── STATUS: "R1:ON" or "R2:OFF" ── */
+    if(topic==='home/relay/status'||topic.indexOf('home/relay/status/r')===0){
+      parseStatusMsg(msg); return;
+    }
+
+    /* ── ALL STATUS: "R1:ON,R2:OFF,R3:ON,R4:OFF" ── */
+    if(topic==='home/relay/status/all'){
+      msg.split(',').forEach(function(part){ parseStatusMsg(part.trim()); });
+      return;
+    }
+
+    /* ── RTC time sync ── */
+    if(topic==='home/rtc'||topic==='home/rtc/time'){
+      try{ var obj=JSON.parse(msg); if(obj.epoch){applyTime(obj.epoch);return;} if(obj.unixtime){applyTime(obj.unixtime);return;} }catch(e){}
+      if(/^\d{9,11}$/.test(msg)){applyTime(parseInt(msg));return;}
+      if(msg.indexOf('T')>0){var ep=Date.parse(msg);if(!isNaN(ep)){applyTime(Math.floor(ep/1000));return;}}
+    }
+  });
+
+  /* Parse "R1:ON" or "R1:OFF" and update the card */
+  function parseStatusMsg(msg){
+    var m=msg.match(/^R([1-4]):(ON|OFF)$/i);
+    if(!m) return;
+    var relay=parseInt(m[1]), isOn=(m[2].toUpperCase()==='ON');
+    applyRelayStatus(relay, isOn);
+  }
+
+  /* Apply confirmed hardware state to the UI */
+  function applyRelayStatus(relay, isOn){
+    var t=getTimeStr();
+    if(relay>=1&&relay<=3){
+      var card=document.getElementById('card'+relay);
+      card.classList.remove('syncing');
+      card.classList.toggle('on', isOn);
+      card.classList.toggle('off',!isOn);
+      document.getElementById('state'+relay).textContent=isOn?'ON':'OFF';
+      document.getElementById('ts'+relay).textContent=t;
+      relayState[relay]=isOn;
+    } else if(relay===4){
+      // Update the live badge on the timer card
+      var badge=document.getElementById('r4LiveBadge');
+      badge.textContent=isOn?'ON':'OFF';
+      badge.classList.toggle('on',isOn);
+    }
+    flashStatus(relay,isOn);
+  }
+
+  function flashStatus(relay,isOn){
+    var fl=document.getElementById('mqttFlash');
+    fl.textContent='✅ R'+relay+' confirmed '+(isOn?'ON':'OFF')+' by ESP32';
+    fl.style.display='block'; fl.style.opacity='1';
+    setTimeout(function(){fl.style.opacity='0';setTimeout(function(){fl.style.display='none';},500);},2000);
+  }
+
+  /* ═══════════════════════════
+     RELAY COMMAND (1-3)
+     Optimistically update UI, show syncing spinner,
+     wait for ESP32 confirmation via status topic
+  ═══════════════════════════ */
+  var relayState={1:false,2:false,3:false};
+  var syncTimers={1:null,2:null,3:null};
+
+  function getTimeStr(){var n=new Date(Date.now()+clockOffset);return pad2(n.getHours())+':'+pad2(n.getMinutes())+':'+pad2(n.getSeconds());}
+
+  function mqttSend(msg){
+    mqttClient.publish('home/relay',msg);
+    var fl=document.getElementById('mqttFlash');
+    fl.textContent='📡 Sent: '+msg; fl.style.display='block'; fl.style.opacity='1';
+    setTimeout(function(){fl.style.opacity='0';setTimeout(function(){fl.style.display='none';},500);},1500);
+  }
+
+  function toggleRelay(relay){
+    var isOn=relayState[relay];
+    var card=document.getElementById('card'+relay);
+    // Optimistic update
+    relayState[relay]=!isOn;
+    card.classList.toggle('on',!isOn); card.classList.toggle('off',isOn);
+    document.getElementById('state'+relay).textContent=isOn?'OFF':'ON';
+    document.getElementById('ts'+relay).textContent=getTimeStr();
+    // Show syncing spinner (removed once ESP32 confirms)
+    card.classList.add('syncing');
+    if(syncTimers[relay]) clearTimeout(syncTimers[relay]);
+    syncTimers[relay]=setTimeout(function(){card.classList.remove('syncing');},5000); // fallback remove after 5s
+    mqttSend('R'+relay+(isOn?'OFF':'ON'));
+  }
+
+  for(var r=1;r<=3;r++){
+    (function(relay){document.getElementById('card'+relay).addEventListener('click',function(){toggleRelay(relay);});})(r);
+  }
+
+  /* ═══════════════════════════
+     TIMER SWITCH (Relay 4)
+  ═══════════════════════════ */
+  var CIRC=2*Math.PI*47;
+  var timerInterval=null,timerTotal=0,timerLeft=0;
+  var ringFill=document.getElementById('ringFill');
+  var ringDigits=document.getElementById('ringDigits');
+  var ringUnit=document.getElementById('ringUnit');
+  var timerBadge=document.getElementById('timerBadge');
+  var timerCard=document.getElementById('timerCard');
+  ringFill.style.strokeDasharray=CIRC; ringFill.style.strokeDashoffset=CIRC;
+
+  function fmtCountdown(s){var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;if(h>0)return h+':'+pad2(m)+':'+pad2(sc);return pad2(m)+':'+pad2(sc);}
+
+  function updateRing(left,total){
+    ringFill.style.strokeDashoffset=CIRC*(total>0?(1-left/total):1);
+    ringDigits.textContent=fmtCountdown(left);
+  }
+
+  function setPreset(h,m,s){if(timerInterval)return;document.getElementById('durHr').value=h;document.getElementById('durMin').value=m;document.getElementById('durSec').value=s;}
+
+  function setInputsDisabled(dis){
+    ['durHr','durMin','durSec'].forEach(function(id){document.getElementById(id).disabled=dis;});
+    document.querySelectorAll('.preset-btn').forEach(function(b){b.disabled=dis;});
+  }
+
+  function startTimer(){
+    var h=parseInt(document.getElementById('durHr').value)||0;
+    var m=parseInt(document.getElementById('durMin').value)||0;
+    var s=parseInt(document.getElementById('durSec').value)||0;
+    var total=h*3600+m*60+s;
+    if(total<=0){alert('Set a duration greater than 0.');return;}
+    timerTotal=total; timerLeft=total;
+    mqttSend('R4ON');
+    timerCard.classList.remove('done'); timerCard.classList.add('running');
+    timerBadge.textContent='RUNNING'; ringUnit.textContent='remaining';
+    setInputsDisabled(true); updateRing(timerLeft,timerTotal);
+    timerInterval=setInterval(function(){timerLeft--;updateRing(timerLeft,timerTotal);if(timerLeft<=0)finishTimer();},1000);
+  }
+
+  function finishTimer(){
+    clearInterval(timerInterval); timerInterval=null;
+    mqttSend('R4OFF');
+    timerCard.classList.remove('running'); timerCard.classList.add('done');
+    timerBadge.textContent='DONE ✓'; ringDigits.textContent='00:00:00';
+    ringUnit.textContent='finished'; ringFill.style.strokeDashoffset=CIRC;
+    setInputsDisabled(false);
+    setTimeout(function(){timerCard.classList.remove('done');timerBadge.textContent='IDLE';ringUnit.textContent='ready';},4000);
+  }
+
+  function cancelTimer(){
+    if(!timerInterval)return;
+    clearInterval(timerInterval); timerInterval=null;
+    mqttSend('R4OFF');
+    timerCard.classList.remove('running','done'); timerBadge.textContent='IDLE';
+    ringDigits.textContent='00:00:00'; ringUnit.textContent='ready';
+    ringFill.style.strokeDashoffset=CIRC; setInputsDisabled(false);
+  }
+
+  document.getElementById('durSec').addEventListener('blur',function(){var v=parseInt(this.value)||0;this.value=Math.min(59,Math.max(0,v));});
+  document.getElementById('durMin').addEventListener('blur',function(){var v=parseInt(this.value)||0;this.value=Math.min(59,Math.max(0,v));});
+  document.getElementById('durHr').addEventListener('blur',function(){var v=parseInt(this.value)||0;this.value=Math.max(0,v);});
+
+  /* ═══════════════════════════
+     RTC SCHEDULE
+  ═══════════════════════════ */
+  var scheduleOn=null,scheduleOff=null,schedFiredOn=false,schedFiredOff=false;
+  function setRtcSchedule(){
+    var on=document.getElementById('rtcOnTime').value,off=document.getElementById('rtcOffTime').value;
+    if(!on||!off){alert('Set both ON and OFF times.');return;}
+    scheduleOn=on; scheduleOff=off; schedFiredOn=false; schedFiredOff=false;
+    var sl=document.getElementById('rtcStatusLine');
+    sl.textContent='Schedule active → ON '+on+' · OFF '+off; sl.classList.add('active');
+    mqttClient.publish('home/rtc/schedule',JSON.stringify({on:on,off:off}));
+  }
+  function clearRtcSchedule(){
+    scheduleOn=null; scheduleOff=null;
+    var sl=document.getElementById('rtcStatusLine');
+    sl.textContent='No schedule active'; sl.classList.remove('active');
+    mqttClient.publish('home/rtc/schedule','{}');
+  }
+  function checkRtcSchedule(d){
+    if(!scheduleOn||!scheduleOff)return;
+    var hhmm=pad2(d.getHours())+':'+pad2(d.getMinutes()),ss=pad2(d.getSeconds());
+    if(hhmm===scheduleOn&&ss==='00'&&!schedFiredOn){schedFiredOn=true;schedFiredOff=false;mqttSend('R4ON');timerBadge.textContent='SCHED ON';}
+    if(hhmm===scheduleOff&&ss==='00'&&!schedFiredOff){schedFiredOff=true;schedFiredOn=false;mqttSend('R4OFF');timerBadge.textContent='SCHED OFF';}
+    if(ss==='30'){if(hhmm!==scheduleOn)schedFiredOn=false;if(hhmm!==scheduleOff)schedFiredOff=false;}
+  }
+
+  /* ═══════════════════════════
+     SETTINGS
+  ═══════════════════════════ */
+  function openSettings(){for(var i=1;i<=4;i++)document.getElementById('pname'+i).value=document.getElementById('labeltext'+i).textContent.trim();document.getElementById('settingsPanel').classList.add('open');}
+  function closeSettings(){document.getElementById('settingsPanel').classList.remove('open');}
+  function saveAll(){for(var i=1;i<=4;i++){var v=document.getElementById('pname'+i).value.trim();if(v)document.getElementById('labeltext'+i).textContent=v;}closeSettings();}
+  document.getElementById('settingsBtn').addEventListener('click',openSettings);
+  document.getElementById('settingsPanel').addEventListener('click',function(e){if(e.target===this)closeSettings();});
+
+  /* ═══════════════════════════
+     BG THEMES
+  ═══════════════════════════ */
+  var bgThemes={1:{from:'#f5f0e8',mid:'#ede8dc',to:'#e8e0d0'},2:{from:'#dbeafe',mid:'#bfdbfe',to:'#93c5fd'},3:{from:'#f0f9ff',mid:'#e0f2fe',to:'#bae6fd'},4:{from:'#f8fafc',mid:'#e2e8f0',to:'#cbd5e1'},5:{from:'#faf5ff',mid:'#ede9fe',to:'#ddd6fe'},6:{from:'#f0fdf4',mid:'#dcfce7',to:'#bbf7d0'},7:{from:'#fff7ed',mid:'#fed7aa',to:'#fdba74'},8:{from:'#0d1117',mid:'#0f1923',to:'#0a1628'}};
+  function setBg(idx,el){
+    var t=bgThemes[idx];
+    document.documentElement.style.setProperty('--bg-from',t.from);
+    document.documentElement.style.setProperty('--bg-mid',t.mid);
+    document.documentElement.style.setProperty('--bg-to',t.to);
+    if(idx===8){document.documentElement.style.setProperty('--card-bg','rgba(255,255,255,0.05)');document.documentElement.style.setProperty('--text','#f0f4fc');document.documentElement.style.setProperty('--muted','#8899b8');document.documentElement.style.setProperty('--border','rgba(255,255,255,0.08)');document.documentElement.style.setProperty('--cream','#111827');}
+    else{document.documentElement.style.setProperty('--card-bg','#ffffff');document.documentElement.style.setProperty('--text','#1a2740');document.documentElement.style.setProperty('--muted','#7a8ba8');document.documentElement.style.setProperty('--border','rgba(29,111,206,0.15)');document.documentElement.style.setProperty('--cream','#f9f5ed');}
+    document.querySelectorAll('.swatch').forEach(function(s){s.classList.remove('active');});
+    el.classList.add('active');
+  }
+  </script>
+</body>
+</html>
